@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TLB Hit/Miss Simulator</title>
+<style>
+:root{--bg:#eef2f5;--panel:#fff;--ink:#17212b;--mute:#5b6b7a;--line:#d3dce4;--hit:#14804f;--hitbg:#dcf3e7;--miss:#c0392b;--missbg:#fbe2de;--acc:#1d5fa8;--accbg:#e1edf9;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111a22;--panel:#1a2631;--ink:#e6edf3;--mute:#93a4b4;--line:#2c3b49;--hit:#4cc990;--hitbg:#15382a;--miss:#ff8a79;--missbg:#44211d;--acc:#7db6f0;--accbg:#1c3149;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111a22;--panel:#1a2631;--ink:#e6edf3;--mute:#93a4b4;--line:#2c3b49;--hit:#4cc990;--hitbg:#15382a;--miss:#ff8a79;--missbg:#44211d;--acc:#7db6f0;--accbg:#1c3149;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.mono,td,th,textarea,.big{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.wrap{max-width:1080px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:26px;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--mute);margin:0 0 18px;max-width:64ch}
+.grid{display:grid;grid-template-columns:300px 1fr;gap:16px}
+@media(max-width:820px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px}
+.panel h2{font-size:15px;margin:0 0 10px}
+label{display:block;font-size:13px;color:var(--mute);margin:10px 0 3px}
+select,input,textarea{width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font-size:14px}
+textarea{height:84px;resize:vertical}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1}
+button{padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit;font-size:14px;cursor:pointer}
+button.p{background:var(--acc);border-color:var(--acc);color:#fff}
+:root[data-theme="dark"] button.p{color:#0b1520}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) button.p{color:#0b1520}}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chips button{font-size:12px;padding:4px 8px;flex:none}
+.xlate{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch}
+.box{border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:96px;flex:1}
+.box small{display:block;color:var(--mute);font-size:12px}
+.box b{font-size:17px}
+.verdict{flex:1.4;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;border-radius:8px}
+.verdict.hit{background:var(--hitbg);color:var(--hit)}
+.verdict.miss{background:var(--missbg);color:var(--miss)}
+.verdict.idle{border:1px dashed var(--line);color:var(--mute);font-size:14px;font-weight:400}
+.note{font-size:13px;color:var(--mute);margin:8px 0 0}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+th{font-size:12px;color:var(--mute);font-weight:600}
+tr.hit td{background:var(--hitbg)}
+tr.miss td{background:var(--missbg)}
+td.empty{color:var(--mute)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:10px}
+.bar{height:10px;border-radius:5px;background:var(--missbg);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--hit);width:0}
+.log{max-height:240px;overflow:auto}
+.tag{display:inline-block;min-width:38px;text-align:center;border-radius:4px;font-weight:700;font-size:12px;padding:1px 6px}
+.tag.hit{background:var(--hitbg);color:var(--hit)}
+.tag.miss{background:var(--missbg);color:var(--miss)}
+svg{width:100%;height:110px;display:block}
+.theme{float:right;flex:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<button class="theme" id="theme" aria-label="Toggle theme">Theme</button>
+<h1>TLB hit/miss simulator</h1>
+<p class="sub">Feed in virtual addresses and watch the Translation Lookaside Buffer decide, one reference at a time, whether the page is already cached or needs a page-table walk.</p>
+
+<div class="grid">
+<div>
+<div class="panel">
+<h2>Setup</h2>
+<label for="size">TLB entries</label>
+<input id="size" type="number" min="1" max="16" value="4">
+<label for="ps">Page size</label>
+<select id="ps"><option>256</option><option selected>1024</option><option>4096</option></select>
+<label for="pol">Replacement policy</label>
+<select id="pol"><option value="lru">LRU (least recently used)</option><option value="fifo">FIFO (oldest loaded)</option><option value="opt">Optimal (farthest next use)</option></select>
+<div class="row">
+<div><label for="tt">TLB time (ns)</label><input id="tt" type="number" min="0" value="10"></div>
+<div><label for="mt">Memory time (ns)</label><input id="mt" type="number" min="1" value="100"></div>
+</div>
+</div>
+<div class="panel">
+<h2>Address sequence</h2>
+<label for="refs">Virtual addresses (decimal or 0x hex)</label>
+<textarea id="refs" spellcheck="false"></textarea>
+<div class="chips" id="presets"></div>
+<div class="row" style="margin-top:12px">
+<button id="step" class="p">Step</button>
+<button id="play">Play</button>
+</div>
+<div class="row" style="margin-top:8px">
+<button id="all">Run all</button>
+<button id="reset">Reset</button>
+</div>
+<label for="speed">Play speed</label>
+<select id="speed"><option value="900">Slow</option><option value="450" selected>Medium</option><option value="120">Fast</option></select>
+</div>
+</div>
+
+<div>
+<div class="panel">
+<h2>Current translation</h2>
+<div class="xlate" id="xlate"></div>
+<p class="note" id="xnote"></p>
+</div>
+<div class="panel">
+<h2>TLB contents</h2>
+<table><thead><tr><th>Slot</th><th>Page</th><th>Frame</th><th>Loaded at</th><th>Last used</th></tr></thead><tbody id="tlb"></tbody></table>
+</div>
+<div class="panel">
+<h2>Results</h2>
+<div class="stats" id="stats"></div>
+<div class="bar"><i id="bar"></i></div>
+<p class="note" id="eat"></p>
+<svg id="chart" viewBox="0 0 600 110" preserveAspectRatio="none" aria-label="Running hit ratio"></svg>
+</div>
+<div class="panel">
+<h2>Reference log</h2>
+<div class="log"><table><thead><tr><th>#</th><th>Virtual</th><th>Page</th><th>Result</th><th>Physical</th><th>Evicted</th></tr></thead><tbody id="log"></tbody></table></div>
+</div>
+</div>
+</div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let S,timer=null;
+const hex=n=>'0x'+n.toString(16).toUpperCase();
+
+const presets={
+ 'Good locality':[0,0,1,0,1,2,1,2,0,1,3,1,0,2,3,3,0,1],
+ 'Loop of 5 pages':[0,1,2,3,4,0,1,2,3,4,0,1,2,3,4],
+ 'Sequential scan':[0,1,2,3,4,5,6,7,8,9,10,11],
+ 'Random pages':'rand'
+};
+function fill(name){
+ const ps=+$('ps').value;let p=presets[name];
+ if(p==='rand')p=Array.from({length:20},()=>Math.floor(Math.random()*8));
+ $('refs').value=p.map((pg,k)=>pg*ps+((k*137+41)%ps)).join(', ');
+ reset();
+}
+Object.keys(presets).forEach(n=>{const b=document.createElement('button');b.textContent=n;b.onclick=()=>fill(n);$('presets').appendChild(b)});
+
+function cfg(){return{size:Math.max(1,Math.min(16,+$('size').value||1)),ps:+$('ps').value,pol:$('pol').value,tt:+$('tt').value||0,mt:+$('mt').value||1}}
+function parse(){return $('refs').value.split(/[\s,;]+/).filter(Boolean).map(s=>/^0x/i.test(s)?parseInt(s,16):parseInt(s,10)).filter(n=>Number.isFinite(n)&&n>=0)}
+
+function reset(){
+ stop();
+ S={c:cfg(),refs:parse(),i:0,tlb:[],pt:new Map(),next:0,hits:0,miss:0,log:[],hist:[],clock:0,last:null};
+ render();
+}
+function victim(){
+ const {tlb,c}=S;
+ if(c.pol==='opt'){
+  let best=0,far=-1;
+  tlb.forEach((e,k)=>{
+   let d=Infinity;
+   for(let j=S.i+1;j<S.refs.length;j++){if(Math.floor(S.refs[j]/c.ps)===e.page){d=j;break}}
+   if(d>far){far=d;best=k}
+  });
+  return best;
+ }
+ const key=c.pol==='fifo'?'loaded':'used';
+ let best=0;tlb.forEach((e,k)=>{if(e[key]<tlb[best][key])best=k});
+ return best;
+}
+function step(){
+ if(S.i>=S.refs.length){stop();return false}
+ const {c}=S,va=S.refs[S.i],page=Math.floor(va/c.ps),off=va%c.ps;
+ S.clock++;
+ let e=S.tlb.find(x=>x.page===page),hit=!!e,evicted=null,slot;
+ if(hit){e.used=S.clock;S.hits++;slot=S.tlb.indexOf(e)}
+ else{
+  S.miss++;
+  if(!S.pt.has(page))S.pt.set(page,S.next++);
+  e={page,frame:S.pt.get(page),loaded:S.clock,used:S.clock};
+  if(S.tlb.length>=c.size){const v=victim();evicted=S.tlb[v].page;S.tlb[v]=e;slot=v}
+  else{S.tlb.push(e);slot=S.tlb.length-1}
+ }
+ const pa=e.frame*c.ps+off;
+ S.last={va,page,off,hit,pa,frame:e.frame,evicted,slot};
+ S.log.push({n:S.i+1,...S.last});
+ S.hist.push(S.hits/(S.i+1));
+ S.i++;
+ render();
+ return true;
+}
+function play(){
+ if(timer){stop();return}
+ if(S.i>=S.refs.length)reset();
+ $('play').textContent='Pause';
+ timer=setInterval(()=>{if(!step())stop()},+$('speed').value);
+}
+function stop(){if(timer){clearInterval(timer);timer=null}$('play').textContent='Play'}
+function all(){stop();while(step());}
+
+function render(){
+ const L=S.last,c=S.c;
+ const box=(k,v)=>`<div class="box"><small>${k}</small><b class="big">${v}</b></div>`;
+ if(!L){
+  $('xlate').innerHTML=`<div class="verdict idle">Press Step to process the first address (${S.refs.length} queued)</div>`;
+  $('xnote').textContent='';
+ }else{
+  $('xlate').innerHTML=box('Virtual address',hex(L.va))+box('Page number',L.page)+box('Offset',L.off)+
+   `<div class="verdict ${L.hit?'hit':'miss'}">${L.hit?'TLB hit':'TLB miss'}</div>`+box('Frame',L.frame)+box('Physical address',hex(L.pa));
+  $('xnote').textContent=L.hit
+   ?`Page ${L.page} was cached, so the frame came straight from the TLB: ${c.tt+c.mt} ns for this reference.`
+   :`Page ${L.page} was not cached. The page table in memory was read to find frame ${L.frame}${L.evicted!==null?`, and page ${L.evicted} was evicted to make room`:`, and the entry went into a free slot`}: ${c.tt+2*c.mt} ns for this reference.`;
+ }
+ let rows='';
+ for(let k=0;k<c.size;k++){
+  const e=S.tlb[k];
+  if(!e)rows+=`<tr><td>${k}</td><td class="empty" colspan="4">empty</td></tr>`;
+  else rows+=`<tr class="${L&&L.slot===k?(L.hit?'hit':'miss'):''}"><td>${k}</td><td>${e.page}</td><td>${e.frame}</td><td>${e.loaded}</td><td>${e.used}</td></tr>`;
+ }
+ $('tlb').innerHTML=rows;
+ const n=S.hits+S.miss,h=n?S.hits/n:0;
+ const avg=n?(S.hits*(c.tt+c.mt)+S.miss*(c.tt+2*c.mt))/n:0;
+ $('stats').innerHTML=box('Processed',`${n}/${S.refs.length}`)+box('Hits',S.hits)+box('Misses',S.miss)+box('Hit ratio',(h*100).toFixed(1)+'%')+box('Avg time',n?avg.toFixed(1)+' ns':'-');
+ $('bar').style.width=(h*100)+'%';
+ $('eat').textContent=n?`EAT = h × (t + m) + (1 − h) × (t + 2m) = ${h.toFixed(3)} × ${c.tt+c.mt} + ${(1-h).toFixed(3)} × ${c.tt+2*c.mt} = ${avg.toFixed(1)} ns`:'Effective access time appears once the first address is processed.';
+ const W=600,H=110,m=8;
+ let svg=`<line x1="0" y1="${H-m}" x2="${W}" y2="${H-m}" stroke="var(--line)"/><line x1="0" y1="${m}" x2="${W}" y2="${m}" stroke="var(--line)" stroke-dasharray="4 4"/>`;
+ if(S.hist.length){
+  const N=Math.max(S.refs.length-1,1);
+  const pts=S.hist.map((v,k)=>`${(S.refs.length>1?k/N:0)*W},${H-m-v*(H-2*m)}`).join(' ');
+  svg+=`<polyline points="${pts}" fill="none" stroke="var(--acc)" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`;
+ }
+ $('chart').innerHTML=svg;
+ $('log').innerHTML=S.log.slice().reverse().map(r=>`<tr><td>${r.n}</td><td>${hex(r.va)}</td><td>${r.page}</td><td><span class="tag ${r.hit?'hit':'miss'}">${r.hit?'HIT':'MISS'}</span></td><td>${hex(r.pa)}</td><td>${r.evicted===null?'-':'page '+r.evicted}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">Nothing processed yet.</td></tr>';
+}
+
+$('step').onclick=()=>{stop();step()};
+$('play').onclick=play;
+$('all').onclick=()=>{reset();all()};
+$('reset').onclick=reset;
+['size','ps','pol','tt','mt'].forEach(id=>$(id).addEventListener('change',reset));
+$('refs').addEventListener('input',reset);
+$('speed').addEventListener('change',()=>{if(timer){stop();play()}});
+$('theme').onclick=()=>{
+ const r=document.documentElement,dark=matchMedia('(prefers-color-scheme: dark)').matches;
+ const cur=r.dataset.theme||(dark?'dark':'light');
+ r.dataset.theme=cur==='dark'?'light':'dark';
+};
+fill('Good locality');
+</script>
+</body>
+</html>
